@@ -11,7 +11,7 @@ Try executing this chunk by clicking the *Run* button within the chunk or by pla
 
 # Loading and Exploring Data
 
-```{r results='hide'}
+```{r }
 # loading data from CSV files.
 train <- read_csv("./data/input/train.csv")
 test <- read_csv("./data/input/test.csv")
@@ -125,7 +125,7 @@ train %>%
   labs(x = "features", y = "missing %") 
 
 ```
-A lot of missing data in some some variables!!
+A lot of missing data in some variables!!
 
 
 # Explore the target variable "transactionRevenue"
@@ -163,10 +163,173 @@ train %>%
   ggplot(aes(x = reorder(channelGrouping, -total_rev), y = total_rev)) +
   geom_point() +
   theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "Channel Grouping", y = "Total Revenue") 
 ```
 
+Both **Social** and **Affilites** channels transactions don't generate revnue. The major revenue comes from **Referral** and **Direct** channels.
 
-Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+## Revenue Vs visitNumber Relation
+  
+```{r result='asis', message=FALSE, warning=FALSE, echo=FALSE}
+train %>%
+  bind_cols(as_tibble(log1p(y_rev))) %>%
+  group_by(visitNumber) %>%
+  summarise(log_total_rev = sum(value)) %>%
+  ggplot(aes(x = visitNumber, y = log_total_rev)) +
+  geom_point() +
+  theme_minimal() +
+  scale_x_continuous(breaks=c(1, 3, 5, 10, 15, 25, 50, 100), limits=c(0, 105))
+  #scale_y_continuous()
+  
+```
+
+Most of the revnue comes from the first visit.
+
+
+```{r echo=FALSE}
+
+# -------- channelGrouping ----------------- 
+train %>% 
+  bind_cols(as_tibble(y_rev)) %>% 
+  group_by(channelGrouping) %>% 
+  summarize(visits = n(), total_revenue = sum(value)) %>% 
+  ungroup() %>% 
+  mutate(channelGrouping = reorder(channelGrouping, -visits)) %>% 
+  data.table::melt(id.vars = c("channelGrouping")) %>% 
+  ggplot(aes(channelGrouping, value, fill = variable)) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = scales::comma) +
+  facet_wrap(~ variable, scales = "free") + 
+  theme_minimal() +
+  labs(x = "", y = "", title = "Visit and Revenue Distn over Channel Grouping") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position="none") 
+# -------- browser ----------------- 
+train %>% 
+  bind_cols(as_tibble(y_rev)) %>% 
+  mutate(browser = factor(browser) %>% fct_lump(prop=0.01)) %>% 
+  group_by(browser) %>% 
+  summarize(visits = n(), total_revenue = sum(value)) %>% 
+  ungroup() %>% 
+  mutate(browser = reorder(browser, -visits)) %>% 
+  data.table::melt(id.vars = c("browser")) %>% 
+  ggplot(aes(browser, value, fill = variable)) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = scales::comma) +
+  facet_wrap(~ variable, scales = "free") + 
+  theme_minimal() +
+  labs(x = "", y = "", title = "Visit and Revenue Distn over browser") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position="none") 
+# -------- operatingSystem ----------------- 
+train %>% 
+  bind_cols(as_tibble(y_rev)) %>% 
+  mutate(operatingSystem = factor(operatingSystem) %>% fct_lump(prop=0.01)) %>%
+  group_by(operatingSystem) %>% 
+  summarize(visits = n(), total_revenue = sum(value)) %>% 
+  ungroup() %>% 
+  mutate(operatingSystem = reorder(operatingSystem, -visits)) %>% 
+  data.table::melt(id.vars = c("operatingSystem")) %>% 
+  ggplot(aes(operatingSystem, value, fill = variable)) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = scales::comma) +
+  facet_wrap(~ variable, scales = "free") + 
+  theme_minimal() +
+  labs(x = "", y = "", title = "Visit and Revenue Distn over operatingSystem") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position="none") 
+# -------- deviceCategory ----------------- 
+train %>% 
+  bind_cols(as_tibble(y_rev)) %>% 
+  mutate(deviceCategory = factor(deviceCategory) %>% fct_lump(prop=0.01)) %>%
+  group_by(deviceCategory) %>% 
+  summarize(visits = n(), total_revenue = sum(value)) %>% 
+  ungroup() %>% 
+  mutate(deviceCategory = reorder(deviceCategory, -visits)) %>% 
+  data.table::melt(id.vars = c("deviceCategory")) %>% 
+  ggplot(aes(deviceCategory, value, fill = variable)) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = scales::comma) +
+  facet_wrap(~ variable, scales = "free") + 
+  theme_minimal() +
+  labs(x = "", y = "", title = "Visit and Revenue Distn over deviceCategory") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position="none") 
+# -------- country ----------------- 
+train %>% 
+  bind_cols(as_tibble(y_rev)) %>% 
+  mutate(country = factor(country) %>% fct_lump(prop=0.025)) %>%
+  group_by(country) %>% 
+  summarize(visits = n(), total_revenue = sum(value)) %>% 
+  ungroup() %>% 
+  mutate(country = reorder(country, -visits)) %>% 
+  data.table::melt(id.vars = c("country")) %>% 
+  ggplot(aes(country, value, fill = variable)) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = scales::comma) +
+  facet_wrap(~ variable, scales = "free") + 
+  theme_minimal() +
+  labs(x = "", y = "", title = "Visit and Revenue Distn over country") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position="none") 
+# -------- city ----------------- 
+train %>% 
+  bind_cols(as_tibble(y_rev)) %>% 
+  mutate(city = factor(city) %>% fct_lump(prop=0.01)) %>%
+  group_by(city) %>% 
+  summarize(visits = n(), total_revenue = sum(value)) %>% 
+  ungroup() %>% 
+  mutate(city = fct_explicit_na(city, na_level = "Other") %>% reorder(-visits)) %>%
+  data.table::melt(id.vars = c("city")) %>% 
+  ggplot(aes(city, value, fill = variable)) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = scales::comma) +
+  facet_wrap(~ variable, scales = "free") + 
+  theme_minimal() +
+  labs(x = "", y = "", title = "Visit and Revenue Distn over city") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position="none") 
+
+# -------- networkDomain ----------------- 
+train %>% 
+  bind_cols(as_tibble(y_rev)) %>% 
+  mutate(networkDomain = factor(networkDomain) %>% fct_lump(prop=0.01)) %>%
+  group_by(networkDomain) %>% 
+  summarize(visits = n(), total_revenue = sum(value)) %>% 
+  ungroup() %>% 
+  mutate(networkDomain = fct_explicit_na(networkDomain, na_level = "Other") %>% reorder(-visits)) %>%
+  data.table::melt(id.vars = c("networkDomain")) %>% 
+  ggplot(aes(networkDomain, value, fill = variable)) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = scales::comma) +
+  facet_wrap(~ variable, scales = "free") + 
+  theme_minimal() +
+  labs(x = "", y = "", title = "Visit and Revenue Distn over networkDomain") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position="none") 
+
+# -------- medium ----------------- 
+train %>% 
+  bind_cols(as_tibble(y_rev)) %>% 
+  mutate(medium = factor(medium) %>% fct_lump(prop=0.005)) %>%
+  group_by(medium) %>% 
+  summarize(visits = n(), total_revenue = sum(value)) %>% 
+  ungroup() %>% 
+  mutate(medium = fct_explicit_na(medium, na_level = "Other") %>% reorder(-visits)) %>%
+  data.table::melt(id.vars = c("medium")) %>% 
+  ggplot(aes(medium, value, fill = variable)) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = scales::comma) +
+  facet_wrap(~ variable, scales = "free") + 
+  theme_minimal() +
+  labs(x = "", y = "", title = "Visit and Revenue Distn over medium") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position="none") 
+```
+
+**Conclusions**:
+
+* Majority of visits comes from **Organic Search**, while the majority of revenue comes from **Referral** channels.
 
 When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file).
