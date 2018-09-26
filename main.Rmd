@@ -11,14 +11,13 @@ Try executing this chunk by clicking the *Run* button within the chunk or by pla
 
 # Loading and Exploring Data
 
-```{r}
+```{r results='hide'}
 # loading data from CSV files.
 train <- read_csv("./data/input/train.csv")
 test <- read_csv("./data/input/test.csv")
-
-cat("Train dataset overview: \n\n")
+```
+```{r results='hide'}
 glimpse(train)
-cat("\n\nTest dataset overview: \n\n")
 glimpse(test)
 ```
 
@@ -38,7 +37,7 @@ There are 12 features:
 * **visitStartTime** - the timestamp (POSIX).
 
 The columns device, geoNetwork, trafficSource, and totals are in JSON format. 
-```{r}
+```{r echo=FALSE}
 library(jsonlite)
 
 flatten_json <- . %>%
@@ -63,14 +62,29 @@ test <- parse(test)
 We have two identification variables; sessionId, visitId, and fullVisitorId. We will keep the fullVisitorId as it is needed in our end result and will remove the others from training and testing data.
 
 ```{r}
+library(tidyverse)
 train <- train %>% select(-sessionId, -visitId)
 test <- test %>% select(-sessionId, -visitId)
 ```
 
-
-## Finding Constant Variables
-
+As expected from the description the transactionRevenue variable is exist in the train data only. However, there is another variable -campaingCode- in test data is not exist in the train data. Let's remove it.
 ```{r}
+setdiff(names(train), names(test))
+train["campaignCode"] <- NULL
+```
+
+
+## Finding and Removing Constant Variables
+
+```{r echo= FALSE}
+constant_features <- sapply(train, n_distinct)
+cat("The constant features are: \n\n")
+(deleted_cols = names(constant_features[constant_features == 1]))
+train <- train %>% select(-one_of(deleted_cols))
+test <- test %>% select(-one_of(deleted_cols))
+
+rm(constant_features) 
+rm(deleted_cols)
 
 train %>%
   map_dfr(n_distinct) %>%
@@ -82,6 +96,74 @@ train %>%
   theme_minimal() +
   labs(x = "features", y = "Number of unique values") +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+## Checking features format and its content
+
+```{r}
+glimpse(train)
+```
+
+During data observation, there is different representations for missing data. Let's convert them to NA.
+
+```{r echo=FALSE}
+is_na_val <- function(x) x %in% c("not available in demo dataset", "(not provided)","(not set)", "<NA>", "unknown.unknown","(none)") 
+
+library(magrittr)
+train %<>% mutate_all(funs(ifelse(is_na_val(.), NA, .)))
+test %<>% mutate_all(funs(ifelse(is_na_val(.), NA, .)))
+
+train %>%
+  map_dfr(function(x) mean(is.na(x))) %>%
+  gather() %>%
+  ggplot(aes(reorder(key, -value), value)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  geom_text(aes(label = round(value, 3)), vjust = 1.6, color = "white", size=3) +
+  theme_minimal() +
+  coord_flip() + 
+  labs(x = "features", y = "missing %") 
+
+```
+A lot of missing data in some some variables!!
+
+
+# Explore the target variable "transactionRevenue"
+
+The transactionRevenue looks like it is multiplied by 10^6.
+
+```{r}
+y_rev <- as.numeric(train$transactionRevenue)
+train$transactionRevenue <- NULL
+summary(y_rev)
+```
+We can replce the *NA* with zero safely.
+```{r}
+y_rev %<>% replace_na(0)
+summary(y_rev)
+```
+
+```{r echo=FALSE}
+as_tibble(log1p(y_rev[y_rev > 0])) %>%
+  ggplot(aes(x = value)) + 
+  geom_histogram(bins = 30, fill = "steelblue") + 
+  labs(x = "non-zero transaction revenue") + 
+  theme_minimal()
+```
+
+The target variable distribution is right-skewed and it multiplied by 1e6. So, log-transormation will be used.
+
+## Revenue Vs Channel Group Relation
+```{r echo=FALSE}
+train %>%
+  bind_cols(as_tibble(y_rev)) %>%
+  group_by(channelGrouping) %>%
+  summarise(n = n(), total_rev = sum(value)) %>%
+  arrange(desc(total_rev)) %>%
+  ggplot(aes(x = reorder(channelGrouping, -total_rev), y = total_rev)) +
+  geom_point() +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
 ```
 
 
