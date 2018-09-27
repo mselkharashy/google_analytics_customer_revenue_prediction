@@ -1,6 +1,8 @@
 ---
 title: "Google Analytics Customer Revenue Prediction"
-output: html_notebook
+output:
+  html_notebook: default
+  pdf_document: default
 ---
 
 # Introdcution
@@ -117,9 +119,10 @@ test %<>% mutate_all(funs(ifelse(is_na_val(.), NA, .)))
 train %>%
   map_dfr(function(x) mean(is.na(x))) %>%
   gather() %>%
+  filter(value > 0) %>%
   ggplot(aes(reorder(key, -value), value)) +
   geom_bar(stat = "identity", fill = "steelblue") +
-  geom_text(aes(label = round(value, 3)), vjust = 1.6, color = "white", size=3) +
+  geom_text(aes(label = paste(round(value, 3) * 100, "%")), vjust = .6, color = "white", size=3, hjust = 2) +
   theme_minimal() +
   coord_flip() + 
   labs(x = "features", y = "missing %") 
@@ -186,9 +189,44 @@ train %>%
 
 Most of the revnue comes from the first visit.
 
+## Correlation between revenue and other features
+
+There is a week positive relation with the following features.
 
 ```{r echo=FALSE}
+library(lubridate)
+m <- train %>% 
+  mutate(y_rev = y_rev,
+         date = ymd(date),
+         year = year(date),
+         month = month(date),
+         day = day(date),
+         hits = as.numeric(hits),
+         pageviews = as.numeric(pageviews),
+         bounces = as.numeric(bounces),
+         newVisits = as.numeric(newVisits),
+         isMobile = ifelse(isMobile, 1L, 0L),
+         isTrueDirect = ifelse(isMobile, 1L, 0L)) %>% 
+  mutate_all(funs(ifelse(is.na(.), 0, .))) %>% 
+  select(-date, -fullVisitorId) %>% 
+  mutate_if(is.character, factor) %>% 
+  mutate_if(is.factor, fct_lump, prop = 0.01) %>%
+  model.matrix(~ . - 1, .) %>% 
+  cor() %>%
+  as.data.frame() %>%
+  select(y_rev) %>%
+  data.table::as.data.table(keep.rownames=TRUE) %>%
+  set_names(c("feature", "y_rev_cor")) %>%
+  filter(abs(y_rev_cor) > 0.05) %>%
+  arrange(desc(abs(y_rev_cor)))
+  
+  
+```
 
+
+# Visit and Revenue Distn over multiple categorical variables 
+
+```{r echo=FALSE}
 # -------- channelGrouping ----------------- 
 train %>% 
   bind_cols(as_tibble(y_rev)) %>% 
@@ -326,10 +364,42 @@ train %>%
   labs(x = "", y = "", title = "Visit and Revenue Distn over medium") +
   theme(axis.text.x = element_text(angle = 45, hjust = 1),
         legend.position="none") 
+
 ```
 
 **Conclusions**:
 
 * Majority of visits comes from **Organic Search**, while the majority of revenue comes from **Referral** channels.
+* Chrome is the dominant **browser** in both number of visits and generated revenue.
+* Most of visits comes from devices that running Windows OS, whiel the majority of revenues comes from Mac devices. Chrome OS devices generats a noticed portion of revenue compared to its number of visits.
+* Desktop still push the majority of visits and the generated revenue.
+* Majority of visits and revenues come form the USA.
+* Most visits and revenues comes from the Bay area and NY.
+* Most of visits missing the network domain. Dot Net is the major one in the remaining revenue transactions.
 
-When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file).
+# Categorical Features Interactions
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+library(ggalluvial)
+train %>% 
+  select(country, networkDomain, browser, deviceCategory, channelGrouping) %>% 
+  mutate(networkDomain = str_split(networkDomain, "\\.") %>% map(~ .x[[length(.x)]]) %>% unlist) %>% 
+  mutate_all(factor) %>% 
+  mutate_all(fct_lump, 4) %>% 
+  bind_cols(tibble(y_rev = ifelse(y_rev == 0, "Zero", "Non-zero") %>% factor)) %>% 
+  filter(y_rev == "Non-zero") %>%
+  na.omit() %>% 
+  group_by_all() %>% 
+  count() %>% 
+  ggplot(aes(y = n, 
+             axis1 = country, axis2 = deviceCategory, axis3 = browser,   
+             axis4 = channelGrouping, axis5 = networkDomain)) +
+  geom_alluvium(aes(fill = y_rev), width = 1/12) +
+  geom_stratum(width = 4/10, fill = "black", color = "grey") +
+  geom_label(stat = "stratum", label.strata = TRUE) +
+  theme_minimal() +
+  scale_x_continuous(breaks = 1:5, labels = c("country", "deviceCategory", "browser",
+                                               "channelGrouping", "networkDomain"))
+```
+
+The majority of revnues comes from this interaction **US -> Desktop -> Chrome -> Referral | Organic Search -> Net**
+
