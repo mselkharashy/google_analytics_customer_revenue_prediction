@@ -13,7 +13,8 @@ Try executing this chunk by clicking the *Run* button within the chunk or by pla
 
 # Loading and Exploring Data
 
-```{r }
+```{r results='hide'}
+library(tidyverse)
 # loading data from CSV files.
 train <- read_csv("./data/input/train.csv")
 test <- read_csv("./data/input/test.csv")
@@ -39,6 +40,9 @@ There are 12 features:
 * **visitStartTime** - the timestamp (POSIX).
 
 The columns device, geoNetwork, trafficSource, and totals are in JSON format. 
+
+# Parse JSON fields and spreed them to multiple varaiables
+
 ```{r echo=FALSE}
 library(jsonlite)
 
@@ -63,7 +67,7 @@ test <- parse(test)
 
 We have two identification variables; sessionId, visitId, and fullVisitorId. We will keep the fullVisitorId as it is needed in our end result and will remove the others from training and testing data.
 
-```{r}
+```{r results='hide'}
 library(tidyverse)
 train <- train %>% select(-sessionId, -visitId)
 test <- test %>% select(-sessionId, -visitId)
@@ -78,7 +82,7 @@ train["campaignCode"] <- NULL
 
 ## Finding and Removing Constant Variables
 
-```{r echo= FALSE}
+```{r }
 constant_features <- sapply(train, n_distinct)
 cat("The constant features are: \n\n")
 (deleted_cols = names(constant_features[constant_features == 1]))
@@ -141,7 +145,7 @@ train$transactionRevenue <- NULL
 summary(y_rev)
 ```
 We can replce the *NA* with zero safely.
-```{r}
+```{r echo=FALSE}
 y_rev %<>% replace_na(0)
 summary(y_rev)
 ```
@@ -403,3 +407,112 @@ train %>%
 
 The majority of revnues comes from this interaction **US -> Desktop -> Chrome -> Referral | Organic Search -> Net**
 
+# Data Preparation Before Training 
+
+```{r}
+
+fullVisitorId <- test$fullVisitorId
+id_df <- data.frame(fullVisitorId, stringsAsFactors = FALSE)
+
+impute_missing_values <- function(df, na_level = "Missing") {
+  imputed_col = data.frame(data = 1:nrow(df))
+  df = as.data.frame(df)
+  #loop over all variables 
+  for(i in 1:ncol(df)) {
+    if(is.factor(df[, i])) {
+      df[, i] <- fct_lump(df[, i], prop = 0.025)
+      df[, i] <- fct_explicit_na(df[, i], na_level = na_level)
+    }else if(is.logical(df[, i]) & sum(is.na(df[ ,i]))) {
+      df[, i] = replace_na(df[, i], "Missing")
+      df[, i] = factor(df[, i])
+    }else if(is.numeric(df[,i]) & sum(is.na(df[ ,i]))) {
+      mean_before = mean(df[, i], na.rm = TRUE)
+      var = ifelse(is.na(df[, i]), 1, 0)
+      imputed_col = cbind(imputed_col, as.logical(var))
+      names(imputed_col)[ncol(imputed_col)] = paste(names(df)[i], "imputed", sep = "_")
+      df[,i] = replace_na(df[,i], mean_before)
+    }
+  }
+  imputed_col[1] <- NULL
+  if(length(imputed_col)) {
+    for(i in 1:ncol(imputed_col)) {
+      df = cbind(df, imputed_col[i])
+    }
+  }
+  return(df)
+}
+
+grp_mean <- function(x, grp) ave(x, grp, FUN = function(x) mean(x, na.rm = TRUE))
+
+prepare_for_modeling <- function(df) {
+  df %>% 
+  mutate(date = ymd(date),
+         year = year(date) %>% factor(),
+         month = year(date) %>% factor(),
+         week = week(date) %>% factor(),
+         day = day(date) %>% factor(),
+         visit_hour = as.POSIXct(visitStartTime, origin = "1960-01-01") %>% hour %>% factor(),
+         hits = as.integer(hits),
+         pageviews = as.integer(pageviews),
+         bounces = as.integer(bounces),
+         newVisits = as.integer(newVisits),
+         isMobile = ifelse(isMobile, 1L, 0L),
+         isTrueDirect = ifelse(isTrueDirect, 1L, 0L),
+         adwordsClickInfo.isVideoAd = ifelse(!adwordsClickInfo.isVideoAd, 0L, 1L)) %>% 
+  select(-date, -fullVisitorId, -visitStartTime) %>% 
+  mutate_if(is.character, factor) %>% 
+  mutate(pageviews_mean_vn = grp_mean(pageviews, visitNumber),
+         hits_mean_vn = grp_mean(hits, visitNumber),
+         pageviews_mean_country = grp_mean(pageviews, country),
+         hits_mean_country = grp_mean(hits, country),
+         pageviews_mean_city = grp_mean(pageviews, city),
+         hits_mean_city = grp_mean(hits, city)) %>%
+    impute_missing_values()
+}
+
+train %<>% prepare_for_modeling()
+test %<>% prepare_for_modeling()
+
+
+```
+
+# Submit
+A function that predicts the natural log of the sum of all transactions per user.
+
+```{r}
+submit <- function(pred, output_path) {
+  
+  pred <- pred %>% 
+    as_tibble() %>% 
+    set_names("y") %>% 
+    mutate(y = ifelse(y < 0, 0, expm1(y))) %>% 
+    bind_cols(id_df) %>% 
+    group_by(fullVisitorId) %>% 
+    summarise(y = log1p(sum(y)))
+  
+  read_csv("./data/input/sample_submission.csv") %>%  
+  left_join(pred, by = "fullVisitorId") %>% 
+  mutate(PredictedLogRevenue = round(y, 5)) %>% 
+  select(-y) %>% 
+  write_csv(output_path)
+}
+```
+
+
+# Random Forest
+Using ranger implementation for Random Forest algorithm. 
+
+```{r results='hide'}
+library(ranger)
+rf_model = ranger(y ~ ., data = train %>% mutate(y = log1p(y_rev)))
+```
+
+
+```{r results='hide'}
+rf_model
+summary(rf_model)
+pred <- predict(rf_model, test)
+submit(pred$predictions, "./data/output/ranger.csv")
+```
+
+This model scored on LB is 1.5846
